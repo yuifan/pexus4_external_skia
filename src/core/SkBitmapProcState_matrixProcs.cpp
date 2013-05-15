@@ -1,4 +1,8 @@
-/* NEON optimized code (C) COPYRIGHT 2009 Motorola */
+/* NEON optimized code (C) COPYRIGHT 2009 Motorola 
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 
 #include "SkBitmapProcState.h"
 #include "SkPerspIter.h"
@@ -368,7 +372,7 @@ static void clampx_nofilter_trans(const SkBitmapProcState& s,
     }
 
     // fill the remaining with the max value
-    sk_memset16(xptr, width - 1, count * sizeof(uint16_t));
+    sk_memset16(xptr, width - 1, count);
 }
 
 static void repeatx_nofilter_trans(const SkBitmapProcState& s,

@@ -1,19 +1,11 @@
-/* libs/graphics/images/SkImageDecoder.cpp
-**
-** Copyright 2006, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License");
-** you may not use this file except in compliance with the License.
-** You may obtain a copy of the License at
-**
-**     http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-*/
+
+/*
+ * Copyright 2006 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 
 #include "SkImageDecoder.h"
 #include "SkBitmap.h"
@@ -33,6 +25,7 @@ const char *SkImageDecoder::kFormatName[] = {
     "JPEG",
     "PNG",
     "WBMP",
+    "WEBP",
 };
 
 static SkBitmap::Config gDeviceConfig = SkBitmap::kNo_Config;
@@ -52,14 +45,14 @@ void SkImageDecoder::SetDeviceConfig(SkBitmap::Config config)
 SkImageDecoder::SkImageDecoder()
     : fReporter(NULL), fPeeker(NULL), fChooser(NULL), fAllocator(NULL),
       fSampleSize(1), fDefaultPref(SkBitmap::kNo_Config), fDitherImage(true),
-      fUsePrefTable(false) {
+      fUsePrefTable(false),fPreferQualityOverSpeed(false) {
 }
 
 SkImageDecoder::~SkImageDecoder() {
-    fPeeker->safeUnref();
-    fChooser->safeUnref();
-    fAllocator->safeUnref();
-    fReporter->safeUnref();
+    SkSafeUnref(fPeeker);
+    SkSafeUnref(fChooser);
+    SkSafeUnref(fAllocator);
+    SkSafeUnref(fReporter);
 }
 
 SkImageDecoder::Format SkImageDecoder::getFormat() const {
@@ -153,7 +146,7 @@ SkBitmap::Config SkImageDecoder::getPrefConfig(SrcDepth srcDepth,
 }
 
 bool SkImageDecoder::decode(SkStream* stream, SkBitmap* bm,
-                            SkBitmap::Config pref, Mode mode) {
+                            SkBitmap::Config pref, Mode mode, bool reuseBitmap) {
     // pass a temporary bitmap, so that if we return false, we are assured of
     // leaving the caller's bitmap untouched.
     SkBitmap    tmp;
@@ -163,6 +156,12 @@ bool SkImageDecoder::decode(SkStream* stream, SkBitmap* bm,
     // assign this, for use by getPrefConfig(), in case fUsePrefTable is false
     fDefaultPref = pref;
 
+    if (reuseBitmap) {
+        SkAutoLockPixels alp(*bm);
+        if (bm->getPixels() != NULL) {
+            return this->onDecode(stream, bm, mode);
+        }
+    }
     if (!this->onDecode(stream, &tmp, mode)) {
         return false;
     }
@@ -172,19 +171,14 @@ bool SkImageDecoder::decode(SkStream* stream, SkBitmap* bm,
 
 bool SkImageDecoder::decodeRegion(SkBitmap* bm, SkIRect rect,
                                   SkBitmap::Config pref) {
-    // pass a temporary bitmap, so that if we return false, we are assured of
-    // leaving the caller's bitmap untouched.
-    SkBitmap    tmp;
-
     // we reset this to false before calling onDecodeRegion
     fShouldCancelDecode = false;
     // assign this, for use by getPrefConfig(), in case fUsePrefTable is false
     fDefaultPref = pref;
 
-    if (!this->onDecodeRegion(&tmp, rect)) {
+    if (!this->onDecodeRegion(bm, rect)) {
         return false;
     }
-    bm->swap(tmp);
     return true;
 }
 
@@ -201,19 +195,30 @@ void SkImageDecoder::cropBitmap(SkBitmap *dest, SkBitmap *src,
                                     int width, int height, int srcX, int srcY) {
     int w = width / sampleSize;
     int h = height / sampleSize;
-    if (w == src->width() && h == src->height() &&
-          (srcX - destX) / sampleSize == 0 && (srcY - destY) / sampleSize == 0) {
-        // The output rect is the same as the decode result
-        dest->swap(*src);
-        return;
+    // if the destination has no pixels then we must allocate them.
+    if (dest->isNull()) {
+        dest->setConfig(src->getConfig(), w, h);
+        dest->setIsOpaque(src->isOpaque());
+
+        if (!this->allocPixelRef(dest, NULL)) {
+            SkDEBUGF(("failed to allocate pixels needed to crop the bitmap"));
+            return;
+        }
     }
-    dest->setConfig(src->getConfig(), w, h);
-    dest->setIsOpaque(src->isOpaque());
-    this->allocPixelRef(dest, NULL);
+    // check to see if the destination is large enough to decode the desired
+    // region. If this assert fails we will just draw as much of the source
+    // into the destination that we can.
+    SkASSERT(dest->width() >= w && dest->height() >= h);
+
+    // Set the Src_Mode for the paint to prevent transparency issue in the
+    // dest in the event that the dest was being re-used.
+    SkPaint paint;
+    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
 
     SkCanvas canvas(*dest);
-    canvas.drawBitmap(*src, (srcX - destX) / sampleSize,
-                             (srcY - destY) / sampleSize);
+    canvas.drawSprite(*src, (srcX - destX) / sampleSize,
+                            (srcY - destY) / sampleSize,
+                            &paint);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -227,8 +232,8 @@ bool SkImageDecoder::DecodeFile(const char file[], SkBitmap* bm,
     if (stream.isValid()) {
         if (SkImageDecoder::DecodeStream(&stream, bm, pref, mode, format)) {
             bm->pixelRef()->setURI(file);
+            return true;
         }
-        return true;
     }
     return false;
 }

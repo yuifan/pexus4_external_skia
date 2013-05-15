@@ -1,18 +1,11 @@
+
 /*
- * Copyright 2007, The Android Open Source Project
+ * Copyright 2007 The Android Open Source Project
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
  */
+
 
 #include "SkImageDecoder.h"
 #include "SkImageEncoder.h"
@@ -32,7 +25,7 @@ extern "C" {
     #include "jerror.h"
 }
 
-#ifdef ANDROID
+#ifdef SK_BUILD_FOR_ANDROID
 #include <cutils/properties.h>
 
 // Key to lookup the size of memory buffer set in system property
@@ -55,9 +48,9 @@ public:
     SkJPEGImageIndex() {}
     virtual ~SkJPEGImageIndex() {
         jpeg_destroy_huffman_index(index);
-        delete cinfo->src;
         jpeg_finish_decompress(cinfo);
         jpeg_destroy_decompress(cinfo);
+        delete cinfo->src;
         free(cinfo);
     }
     jpeg_decompress_struct *cinfo;
@@ -84,6 +77,8 @@ protected:
     virtual bool onDecode(SkStream* stream, SkBitmap* bm, Mode);
 private:
     SkJPEGImageIndex *index;
+    int imageWidth;
+    int imageHeight;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -122,7 +117,7 @@ private:
     jpeg_decompress_struct* cinfo_ptr;
 };
 
-#ifdef ANDROID
+#ifdef SK_BUILD_FOR_ANDROID
 /* Check if the memory cap property is set.
    If so, use the memory size for jpeg decode.
 */
@@ -186,7 +181,7 @@ static bool skip_src_rows_tile(jpeg_decompress_struct* cinfo,
 // set a break-point in one place to see all error exists.
 static bool return_false(const jpeg_decompress_struct& cinfo,
                          const SkBitmap& bm, const char msg[]) {
-#if 0
+#ifdef SK_DEBUG
     SkDebugf("libjpeg error %d <%s> from %s [%d %d]", cinfo.err->msg_code,
              cinfo.err->jpeg_message_table[cinfo.err->msg_code], msg,
              bm.width(), bm.height());
@@ -218,7 +213,7 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     jpeg_create_decompress(&cinfo);
     autoClean.set(&cinfo);
 
-#ifdef ANDROID
+#ifdef SK_BUILD_FOR_ANDROID
     overwrite_mem_buffer_size(&cinfo);
 #endif
 
@@ -325,16 +320,30 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
         (config == SkBitmap::kRGB_565_Config && 
                 cinfo.out_color_space == JCS_RGB_565)))
     {
-        bm->setConfig(config, cinfo.output_width, cinfo.output_height);
-        bm->setIsOpaque(true);
-        if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+        bm->lockPixels();
+        JSAMPLE* rowptr = (JSAMPLE*)bm->getPixels();
+        bm->unlockPixels();
+        bool reuseBitmap = (rowptr != NULL);
+        if (reuseBitmap && ((int) cinfo.output_width != bm->width() ||
+                (int) cinfo.output_height != bm->height())) {
+            // Dimensions must match
+            return false;
+        }
+
+        if (!reuseBitmap) {
+            bm->setConfig(config, cinfo.output_width, cinfo.output_height);
+            bm->setIsOpaque(true);
+            if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+                return true;
+            }
+            if (!this->allocPixelRef(bm, NULL)) {
+                return return_false(cinfo, *bm, "allocPixelRef");
+            }
+        } else if (SkImageDecoder::kDecodeBounds_Mode == mode) {
             return true;
         }
-        if (!this->allocPixelRef(bm, NULL)) {
-            return return_false(cinfo, *bm, "allocPixelRef");
-        }
         SkAutoLockPixels alp(*bm);
-        JSAMPLE* rowptr = (JSAMPLE*)bm->getPixels();
+        rowptr = (JSAMPLE*)bm->getPixels();
         INT32 const bpr =  bm->rowBytes();
         
         while (cinfo.output_scanline < cinfo.output_height) {
@@ -348,6 +357,9 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
                 return return_false(cinfo, *bm, "shouldCancelDecode");
             }
             rowptr += bpr;
+        }
+        if (reuseBitmap) {
+            bm->notifyPixelsChanged();
         }
         jpeg_finish_decompress(&cinfo);
         return true;
@@ -374,15 +386,29 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     SkScaledBitmapSampler sampler(cinfo.output_width, cinfo.output_height,
                                   sampleSize);
 
-    bm->setConfig(config, sampler.scaledWidth(), sampler.scaledHeight());
-    // jpegs are always opauqe (i.e. have no per-pixel alpha)
-    bm->setIsOpaque(true);
-
-    if (SkImageDecoder::kDecodeBounds_Mode == mode) {
-        return true;
+    bm->lockPixels();
+    JSAMPLE* rowptr = (JSAMPLE*)bm->getPixels();
+    bool reuseBitmap = (rowptr != NULL);
+    bm->unlockPixels();
+    if (reuseBitmap && (sampler.scaledWidth() != bm->width() ||
+            sampler.scaledHeight() != bm->height())) {
+        // Dimensions must match
+        return false;
     }
-    if (!this->allocPixelRef(bm, NULL)) {
-        return return_false(cinfo, *bm, "allocPixelRef");
+
+    if (!reuseBitmap) {
+        bm->setConfig(config, sampler.scaledWidth(), sampler.scaledHeight());
+        // jpegs are always opaque (i.e. have no per-pixel alpha)
+        bm->setIsOpaque(true);
+
+        if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+            return true;
+        }
+        if (!this->allocPixelRef(bm, NULL)) {
+            return return_false(cinfo, *bm, "allocPixelRef");
+        }
+    } else if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+        return true;
     }
 
     SkAutoLockPixels alp(*bm);                          
@@ -390,7 +416,7 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
         return return_false(cinfo, *bm, "sampler.begin");
     }
 
-    uint8_t* srcRow = (uint8_t*)srcStorage.alloc(cinfo.output_width * 4);
+    uint8_t* srcRow = (uint8_t*)srcStorage.reset(cinfo.output_width * 4);
 
     //  Possibly skip initial rows [sampler.srcY0]
     if (!skip_src_rows(&cinfo, srcRow, sampler.srcY0())) {
@@ -423,6 +449,9 @@ bool SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     if (!skip_src_rows(&cinfo, srcRow,
                        cinfo.output_height - cinfo.output_scanline)) {
         return return_false(cinfo, *bm, "skip rows");
+    }
+    if (reuseBitmap) {
+        bm->notifyPixelsChanged();
     }
     jpeg_finish_decompress(&cinfo);
 
@@ -457,7 +486,7 @@ bool SkJPEGImageDecoder::onBuildTileIndex(SkStream* stream,
     cinfo->do_fancy_upsampling = 0;
     cinfo->do_block_smoothing = 0;
 
-#ifdef ANDROID
+#ifdef SK_BUILD_FOR_ANDROID
     overwrite_mem_buffer_size(cinfo);
 #endif
 
@@ -482,7 +511,7 @@ bool SkJPEGImageDecoder::onBuildTileIndex(SkStream* stream,
     // Init decoder to image decode mode
     jpeg_create_decompress(cinfo);
 
-#ifdef ANDROID
+#ifdef SK_BUILD_FOR_ANDROID
     overwrite_mem_buffer_size(cinfo);
 #endif
 
@@ -501,7 +530,8 @@ bool SkJPEGImageDecoder::onBuildTileIndex(SkStream* stream,
     index->cinfo = cinfo;
     *height = cinfo->output_height;
     *width = cinfo->output_width;
-
+    this->imageWidth = *width;
+    this->imageHeight = *height;
     this->index = index;
     return true;
 }
@@ -510,11 +540,14 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
     if (index == NULL) {
         return false;
     }
-    int startX = region.fLeft;
-    int startY = region.fTop;
-    int width = region.width();
-    int height = region.height();
     jpeg_decompress_struct *cinfo = index->cinfo;
+
+    SkIRect rect = SkIRect::MakeWH(this->imageWidth, this->imageHeight);
+    if (!rect.intersect(region)) {
+        // If the requested region is entirely outsides the image, just
+        // returns false
+        return false;
+    }
     SkAutoMalloc  srcStorage;
     skjpeg_error_mgr        sk_err;
     cinfo->err = jpeg_std_error(&sk_err);
@@ -552,11 +585,11 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
         }
     }
 #endif
+    int startX = rect.fLeft;
+    int startY = rect.fTop;
+    int width = rect.width();
+    int height = rect.height();
 
-    int oriStartX = startX;
-    int oriStartY = startY;
-    int oriWidth = width;
-    int oriHeight = height;
     jpeg_init_read_tile_scanline(cinfo, index->index,
                                  &startX, &startY, &width, &height);
     int skiaSampleSize = recompute_sampleSize(requestedSampleSize, *cinfo);
@@ -577,9 +610,30 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
     {
         bitmap->setConfig(config, cinfo->output_width, height);
         bitmap->setIsOpaque(true);
-        if (!this->allocPixelRef(bitmap, NULL)) {
-            return return_false(*cinfo, *bitmap, "allocPixelRef");
+
+        // Check ahead of time if the swap(dest, src) is possible or not.
+        // If yes, then we will stick to AllocPixelRef since it's cheaper
+        // with the swap happening. If no, then we will use alloc to allocate
+        // pixels to prevent garbage collection.
+        //
+        // Not using a recycled-bitmap and the output rect is same as the
+        // decoded region.
+        int w = rect.width() / actualSampleSize;
+        int h = rect.height() / actualSampleSize;
+        bool swapOnly = (rect == region) && bm->isNull() &&
+                        (w == bitmap->width()) && (h == bitmap->height()) &&
+                        ((startX - rect.x()) / actualSampleSize == 0) &&
+                        ((startY - rect.y()) / actualSampleSize == 0);
+        if (swapOnly) {
+            if (!this->allocPixelRef(bitmap, NULL)) {
+                return return_false(*cinfo, *bitmap, "allocPixelRef");
+            }
+        } else {
+            if (!bitmap->allocPixels()) {
+                return return_false(*cinfo, *bitmap, "allocPixels");
+            }
         }
+
         SkAutoLockPixels alp(*bitmap);
         JSAMPLE* rowptr = (JSAMPLE*)bitmap->getPixels();
         INT32 const bpr = bitmap->rowBytes();
@@ -599,8 +653,13 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
             row_total_count += row_count;
             rowptr += bpr;
         }
-        cropBitmap(bm, bitmap, actualSampleSize, oriStartX, oriStartY,
-                   oriWidth, oriHeight, startX, startY);
+
+        if (swapOnly) {
+            bm->swap(*bitmap);
+        } else {
+            cropBitmap(bm, bitmap, actualSampleSize, region.x(), region.y(),
+                       region.width(), region.height(), startX, startY);
+        }
         return true;
     }
 #endif
@@ -626,8 +685,24 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
     bitmap->setConfig(config, sampler.scaledWidth(), sampler.scaledHeight());
     bitmap->setIsOpaque(true);
 
-    if (!this->allocPixelRef(bitmap, NULL)) {
-        return return_false(*cinfo, *bitmap, "allocPixelRef");
+    // Check ahead of time if the swap(dest, src) is possible or not.
+    // If yes, then we will stick to AllocPixelRef since it's cheaper with the
+    // swap happening. If no, then we will use alloc to allocate pixels to
+    // prevent garbage collection.
+    int w = rect.width() / actualSampleSize;
+    int h = rect.height() / actualSampleSize;
+    bool swapOnly = (rect == region) && bm->isNull() &&
+                    (w == bitmap->width()) && (h == bitmap->height()) &&
+                    ((startX - rect.x()) / actualSampleSize == 0) &&
+                    ((startY - rect.y()) / actualSampleSize == 0);
+    if (swapOnly) {
+        if (!this->allocPixelRef(bitmap, NULL)) {
+            return return_false(*cinfo, *bitmap, "allocPixelRef");
+        }
+    } else {
+        if (!bitmap->allocPixels()) {
+            return return_false(*cinfo, *bitmap, "allocPixels");
+        }
     }
 
     SkAutoLockPixels alp(*bitmap);
@@ -635,7 +710,7 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
         return return_false(*cinfo, *bitmap, "sampler.begin");
     }
 
-    uint8_t* srcRow = (uint8_t*)srcStorage.alloc(width * 4);
+    uint8_t* srcRow = (uint8_t*)srcStorage.reset(width * 4);
 
     //  Possibly skip initial rows [sampler.srcY0]
     if (!skip_src_rows_tile(cinfo, index->index, srcRow, sampler.srcY0())) {
@@ -664,8 +739,12 @@ bool SkJPEGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
             return return_false(*cinfo, *bitmap, "skip rows");
         }
     }
-    cropBitmap(bm, bitmap, actualSampleSize, oriStartX, oriStartY,
-               oriWidth, oriHeight, startX, startY);
+    if (swapOnly) {
+        bm->swap(*bitmap);
+    } else {
+        cropBitmap(bm, bitmap, actualSampleSize, region.x(), region.y(),
+                   region.width(), region.height(), startX, startY);
+    }
     return true;
 }
 
@@ -885,7 +964,7 @@ protected:
         jpeg_start_compress(&cinfo, TRUE);
 
         const int       width = bm.width();
-        uint8_t*        oneRowP = (uint8_t*)oneRow.alloc(width * 3);
+        uint8_t*        oneRowP = (uint8_t*)oneRow.reset(width * 3);
 
         const SkPMColor* colors = ctLocker.lockColors(bm);
         const void*      srcRow = bm.getPixels();

@@ -1,19 +1,11 @@
-/* libs/graphics/images/SkImageDecoder_libico.cpp
-**
-** Copyright 2006, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
-**
-**     http://www.apache.org/licenses/LICENSE-2.0 
-**
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
-** limitations under the License.
-*/
+
+/*
+ * Copyright 2006 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 
 #include "SkImageDecoder.h"
 #include "SkStream.h"
@@ -31,6 +23,11 @@ public:
 protected:
     virtual bool onDecode(SkStream* stream, SkBitmap* bm, Mode);
 };
+
+SkImageDecoder* SkCreateICOImageDecoder();
+SkImageDecoder* SkCreateICOImageDecoder() {
+    return new SkICOImageDecoder;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -237,12 +234,18 @@ bool SkICOImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode)
     //if the andbitmap (mask) is all zeroes, then we can easily do an index bitmap
     //however, with small images with large colortables, maybe it's better to still do argb_8888
 
-    bm->setConfig(SkBitmap::kARGB_8888_Config, w, h, calculateRowBytesFor8888(w, bitCount));
-    
     if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+        bm->setConfig(SkBitmap::kARGB_8888_Config, w, h, calculateRowBytesFor8888(w, bitCount));
         delete[] colors;
         return true;
     }
+#ifdef SK_BUILD_FOR_ANDROID
+    // No Bitmap reuse supported for this format
+    if (!bm->isNull()) {
+        return false;
+    }
+#endif
+    bm->setConfig(SkBitmap::kARGB_8888_Config, w, h, calculateRowBytesFor8888(w, bitCount));
 
     if (!this->allocPixelRef(bm, NULL))
     {
@@ -351,7 +354,7 @@ static void editPixelBit24(const int pixelNo, const unsigned char* buf,
     int alphaBit = (alphaByte & m) >> shift;
     //alphaBit == 1 => alpha = 0
     int alpha = (alphaBit-1) & 0xFF;
-    *address = SkPackARGB32(alpha, red & alpha, green & alpha, blue & alpha);    
+    *address = SkPreMultiplyARGB(alpha, red, green, blue);    
 }
 
 static void editPixelBit32(const int pixelNo, const unsigned char* buf, 
@@ -363,8 +366,11 @@ static void editPixelBit32(const int pixelNo, const unsigned char* buf,
     int green = readByte(buf, xorOffset + 4*pixelNo + 1);
     int red = readByte(buf, xorOffset + 4*pixelNo + 2);
     int alphaBit = (alphaByte & m) >> shift;
+#if 1 // don't trust the alphaBit for 32bit images <mrr>
+    alphaBit = 0;
+#endif
     int alpha = readByte(buf, xorOffset + 4*pixelNo + 3) & ((alphaBit-1)&0xFF);
-    *address = SkPackARGB32(alpha, red & alpha, green & alpha, blue & alpha);
+    *address = SkPreMultiplyARGB(alpha, red, green, blue);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////

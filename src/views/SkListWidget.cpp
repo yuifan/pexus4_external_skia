@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkWidgetViews.h"
 
 #include "SkAnimator.h"
@@ -31,8 +38,8 @@ SkListView::SkListView()
 
 SkListView::~SkListView()
 {
-	fScrollBar->safeUnref();
-	fSource->safeUnref();
+	SkSafeUnref(fScrollBar);
+	SkSafeUnref(fSource);
 	delete[] fAnims;
 	delete[] fBindings;
 }

@@ -1,19 +1,11 @@
+
 /*
-**
-** Copyright 2007, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
-**
-**     http://www.apache.org/licenses/LICENSE-2.0 
-**
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
-** limitations under the License.
-*/
+ * Copyright 2007 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 
 #include "SkPictureFlat.h"
 #include "SkPicturePlayback.h"
@@ -37,7 +29,7 @@
 
 
 #ifdef SK_DEBUG
-// enable SK_DEBUG_TRACE to trace DrawType elements when 
+// enable SK_DEBUG_TRACE to trace DrawType elements when
 //     recorded and played back
 // #define SK_DEBUG_TRACE
 // enable SK_DEBUG_SIZE to see the size of picture components
@@ -77,12 +69,12 @@ const char* DrawTypeToString(DrawType drawType) {
         case SCALE: return "SCALE";
         case SKEW: return "SKEW";
         case TRANSLATE: return "TRANSLATE";
-        default: 
-            SkDebugf("DrawType error 0x%08x\n", drawType); 
-            SkASSERT(0); 
+        default:
+            SkDebugf("DrawType error 0x%08x\n", drawType);
+            SkASSERT(0);
             break;
     }
-    SkASSERT(0); 
+    SkASSERT(0);
     return NULL;
 }
 #endif
@@ -133,7 +125,7 @@ SkPicture::SkPicture(const SkPicture& src) : SkRefCnt() {
 }
 
 SkPicture::~SkPicture() {
-    fRecord->safeUnref();
+    SkSafeUnref(fRecord);
     SkDELETE(fPlayback);
 }
 
@@ -166,7 +158,7 @@ SkCanvas* SkPicture::beginRecording(int width, int height,
     SkBitmap bm;
     bm.setConfig(SkBitmap::kNo_Config, width, height);
     fRecord->setBitmapDevice(bm);
-    
+
     return fRecord;
 }
 
@@ -200,7 +192,9 @@ void SkPicture::draw(SkCanvas* surface) {
 #define PICTURE_VERSION     1
 
 SkPicture::SkPicture(SkStream* stream) : SkRefCnt() {
-    if (stream->readU32() != PICTURE_VERSION) {
+    const uint32_t  pictureVersion = stream->readU32();
+    if (pictureVersion != PICTURE_VERSION_ICS &&
+        pictureVersion != PICTURE_VERSION_JB) {
         sk_throw();
     }
 
@@ -211,18 +205,18 @@ SkPicture::SkPicture(SkStream* stream) : SkRefCnt() {
     fPlayback = NULL;
 
     if (stream->readBool()) {
-        fPlayback = SkNEW_ARGS(SkPicturePlayback, (stream));
+        fPlayback = SkNEW_ARGS(SkPicturePlayback, (stream, pictureVersion));
     }
 }
 
 void SkPicture::serialize(SkWStream* stream) const {
     SkPicturePlayback* playback = fPlayback;
-    
+
     if (NULL == playback && fRecord) {
         playback = SkNEW_ARGS(SkPicturePlayback, (*fRecord));
     }
 
-    stream->write32(PICTURE_VERSION);
+    stream->write32(PICTURE_VERSION_JB);
     stream->write32(fWidth);
     stream->write32(fHeight);
     if (playback) {

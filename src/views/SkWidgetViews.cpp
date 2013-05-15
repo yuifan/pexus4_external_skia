@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkWidgetViews.h"
 #include "SkAnimator.h"
 #include "SkCanvas.h"
@@ -117,7 +124,7 @@ void SkWidgetView::setLabel(const char label[])
 
 void SkWidgetView::setLabel(const char label[], size_t len)
 {
-	if (label == NULL && fLabel.size() != 0 || !fLabel.equals(label, len))
+	if ((label == NULL && fLabel.size() != 0) || !fLabel.equals(label, len))
 	{
 		SkString	tmp(label, len);
 
@@ -368,7 +375,7 @@ SkView* SkWidgetFactory(const char name[])
 		
 	};
 
-	for (int i = 0; i < SK_ARRAY_COUNT(gNames); i++)
+	for (size_t i = 0; i < SK_ARRAY_COUNT(gNames); i++)
 		if (!strcmp(gNames[i], name))
 			return SkWidgetFactory((SkWidgetEnum)i);
 
@@ -398,7 +405,7 @@ SkView* SkWidgetFactory(SkWidgetEnum sw)
 	case kText_WidgetEnum:
 		return new SkStaticTextView;
 	default:
-		SkASSERT(!"unknown enum passed to SkWidgetFactory");
+		SkDEBUGFAIL("unknown enum passed to SkWidgetFactory");
 		break;
 	}
 	return NULL;

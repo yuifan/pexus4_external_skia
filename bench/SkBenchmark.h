@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef SkBenchmark_DEFINED
 #define SkBenchmark_DEFINED
 
@@ -5,6 +12,12 @@
 #include "SkPoint.h"
 #include "SkTDict.h"
 #include "SkTRegistry.h"
+
+#ifdef SK_DEBUG
+    #define SkBENCHLOOP(n) 1
+#else
+    #define SkBENCHLOOP(n) n
+#endif
 
 class SkCanvas;
 class SkPaint;
@@ -42,6 +55,19 @@ public:
         fDither = state;
     }
 
+    void setStrokeWidth(SkScalar width) {
+      strokeWidth = width;
+      fHasStrokeWidth = true;
+    }
+
+    SkScalar getStrokeWidth() {
+      return strokeWidth;
+    }
+
+    bool hasStrokeWidth() {
+      return fHasStrokeWidth;
+    }
+
     const char* findDefine(const char* key) const;
     bool findDefine32(const char* key, int32_t* value) const;
     bool findDefineScalar(const char* key, SkScalar* value) const;
@@ -60,9 +86,10 @@ private:
     bool    fForceAA;
     bool    fForceFilter;
     SkTriState::State  fDither;
+    bool    fHasStrokeWidth;
+    SkScalar strokeWidth;
 };
 
 typedef SkTRegistry<SkBenchmark*, void*> BenchRegistry;
 
 #endif
-

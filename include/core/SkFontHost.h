@@ -1,18 +1,11 @@
+
 /*
- * Copyright (C) 2006 The Android Open Source Project
+ * Copyright 2006 The Android Open Source Project
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
  */
+
 
 #ifndef SkFontHost_DEFINED
 #define SkFontHost_DEFINED
@@ -24,7 +17,6 @@ class SkDescriptor;
 class SkStream;
 class SkWStream;
 
-typedef uint32_t SkFontID;
 typedef uint32_t SkFontTableTag;
 
 /** \class SkFontHost
@@ -32,7 +24,7 @@ typedef uint32_t SkFontTableTag;
     This class is ported to each environment. It is responsible for bridging
     the gap between the (sort of) abstract class SkTypeface and the
     platform-specific implementation that provides access to font files.
- 
+
     One basic task is for each create (subclass of) SkTypeface, the FontHost is
     resonsible for assigning a uniqueID. The ID should be unique for the
     underlying font file/data, not unique per typeface instance. Thus it is
@@ -44,7 +36,7 @@ typedef uint32_t SkFontTableTag;
     returned). Either way, the fontID for those instance(s) will be the same.
     In addition, the fontID should never be set to 0. That value is used as a
     sentinel to indicate no-font-id.
- 
+
     The major aspects are:
     1) Given either a name/style, return a subclass of SkTypeface that
         references the closest matching font available on the host system.
@@ -56,32 +48,34 @@ typedef uint32_t SkFontTableTag;
         font scaler (e.g. freetype or other) to the font's data.
     5) Utilites to manage the font cache (budgeting) and gamma correction
 */
-class SkFontHost {
+class SK_API SkFontHost {
 public:
     /** Return a new, closest matching typeface given either an existing family
-        (specified by a typeface in that family) or by a familyName, and a
-        requested style.
-        1) If familyFace is null, use famillyName.
-        2) If famillyName is null, use familyFace.
-        3) If both are null, return the default font that best matches style
+        (specified by a typeface in that family) or by a familyName and a
+        requested style, or by a set of Unicode codepoitns to cover in a given
+        style.
+        1) If familyFace is null, use familyName.
+        2) If familyName is null, use data (UTF-16 to cover).
+        3) If all are null, return the default font that best matches style
      */
     static SkTypeface* CreateTypeface(const SkTypeface* familyFace,
-                                      const char famillyName[],
+                                      const char familyName[],
+                                      const void* data, size_t bytelength,
                                       SkTypeface::Style style);
 
     /** Return a new typeface given the data buffer. If the data does not
         represent a valid font, returns null.
-     
+
         If a typeface instance is returned, the caller is responsible for
         calling unref() on the typeface when they are finished with it.
-     
+
         The returned typeface may or may not have called ref() on the stream
         parameter. If the typeface has not called ref(), then it may have made
         a copy of the releveant data. In either case, the caller is still
-        responsible for its refcnt ownership of the stream. 
+        responsible for its refcnt ownership of the stream.
      */
     static SkTypeface* CreateTypefaceFromStream(SkStream*);
-    
+
     /** Return a new typeface from the specified file path. If the file does not
         represent a valid font, this returns null. If a typeface is returned,
         the caller is responsible for calling unref() when it is no longer used.
@@ -89,13 +83,7 @@ public:
     static SkTypeface* CreateTypefaceFromFile(const char path[]);
 
     ///////////////////////////////////////////////////////////////////////////
-    
-    /** Returns true if the specified unique ID matches an existing font.
-        Returning false is similar to calling OpenStream with an invalid ID,
-        which will return NULL in that case.
-    */
-    static bool ValidFontID(SkFontID uniqueID);
-    
+
     /** Return a new stream to read the font data, or null if the uniqueID does
         not match an existing typeface. .The caller must call stream->unref()
         when it is finished reading the data.
@@ -144,19 +132,36 @@ public:
     static SkTypeface* Deserialize(SkStream*);
 
     ///////////////////////////////////////////////////////////////////////////
-    
+
     /** Return a subclass of SkScalarContext
     */
     static SkScalerContext* CreateScalerContext(const SkDescriptor* desc);
 
-    /** Given a "current" fontID, return the next logical fontID to use
-        when searching fonts for a given unicode value. Typically the caller
-        will query a given font, and if a unicode value is not supported, they
-        will call this, and if 0 is not returned, will search that font, and so
-        on. This process must be finite, and when the fonthost sees a
-        font with no logical successor, it must return 0.
-    */
-    static uint32_t NextLogicalFont(SkFontID fontID);
+    /**
+     *  Given a "current" fontID, return the next logical fontID to use
+     *  when searching fonts for a given unicode value. Typically the caller
+     *  will query a given font, and if a unicode value is not supported, they
+     *  will call this, and if 0 is not returned, will search that font, and so
+     *  on. This process must be finite, and when the fonthost sees a
+     *  font with no logical successor, it must return 0.
+     *
+     *  The original fontID is also provided. This is the initial font that was
+     *  stored in the typeface of the caller. It is provided as an aid to choose
+     *  the best next logical font. e.g. If the original font was bold or serif,
+     *  but the 2nd in the logical chain was plain, then a subsequent call to
+     *  get the 3rd can still inspect the original, and try to match its
+     *  stylistic attributes.
+     */
+    static SkFontID NextLogicalFont(SkFontID currFontID, SkFontID origFontID);
+
+#ifdef SK_BUILD_FOR_ANDROID
+    /*
+     * This Android-only version of NextLogicalFont allows us to pass in an
+     * entire Rec structure so that a caller can change fallback behavior
+     */
+    static SkFontID NextLogicalFont(const SkScalerContext::Rec& rec);
+#endif
+
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -174,6 +179,23 @@ public:
 
     ///////////////////////////////////////////////////////////////////////////
 
+    /** Retrieve detailed typeface metrics.  Used by the PDF backend.
+        @param perGlyphInfo Indicate what glyph specific information (advances,
+                            names, etc.) should be populated.
+        @return The returned object has already been referenced.  NULL is
+                returned if the font is not found.
+        @param glyphIDs  For per-glyph info, specify subset of the font by
+                         giving glyph ids.  Each integer represents a glyph
+                         id.  Passing NULL means all glyphs in the font.
+        @param glyphIDsCount Number of elements in subsetGlyphIds. Ignored if
+                             glyphIDs is NULL.
+     */
+    static SkAdvancedTypefaceMetrics* GetAdvancedTypefaceMetrics(
+            SkFontID fontID,
+            SkAdvancedTypefaceMetrics::PerGlyphInfo perGlyphInfo,
+            const uint32_t* glyphIDs,
+            uint32_t glyphIDsCount);
+
     /** Return the number of tables in the font
      */
     static int CountTables(SkFontID);
@@ -187,7 +209,7 @@ public:
     /** Given a table tag, return the size of its contents, or 0 if not present
      */
     static size_t GetTableSize(SkFontID, SkFontTableTag);
-    
+
     /** Copy the contents of a table into data (allocated by the caller). Note
         that the contents of the table will be in their native endian order
         (which for most truetype tables is big endian). If the table tag is
@@ -213,20 +235,9 @@ public:
 
     ///////////////////////////////////////////////////////////////////////////
 
-    /** Return the number of bytes (approx) that should be purged from the font
-        cache. The input parameter is the cache's estimate of how much as been
-        allocated by the cache so far.
-        To purge (basically) everything, return the input parameter.
-        To purge nothing, return 0
-    */
-    static size_t ShouldPurgeFontCache(size_t sizeAllocatedSoFar);
+    /** DEPRECATED -- only called by SkFontHost_FreeType internally
 
-    /** Return SkScalerContext gamma flag, or 0, based on the paint that will be
-        used to draw something with antialiasing.
-    */
-    static int ComputeGammaFlag(const SkPaint& paint);
-
-    /** Return NULL or a pointer to 256 bytes for the black (table[0]) and
+        Return NULL or a pointer to 256 bytes for the black (table[0]) and
         white (table[1]) gamma tables.
     */
     static void GetGammaTables(const uint8_t* tables[2]);
@@ -267,6 +278,7 @@ public:
     static void SetSubpixelOrder(LCDOrder order);
     static LCDOrder GetSubpixelOrder();
 
+#ifdef SK_BUILD_FOR_ANDROID
     ///////////////////////////////////////////////////////////////////////////
 
     /**
@@ -276,7 +288,15 @@ public:
      * @return the number of font units per em or 0 on error.
      */
     static uint32_t GetUnitsPerEm(SkFontID fontID);
+#endif
+
+    /** If Skia is running in a constrained environment and the typeface
+        implementation is handle based, the typeface data may become
+        unavailable asynchronously. If a font host or scaler context method is
+        unable to access font data, it may call this function as a request to
+        make the handle contained in the typeface useable.
+    */
+    static void EnsureTypefaceAccessible(const SkTypeface& typeface);
 };
 
 #endif
-

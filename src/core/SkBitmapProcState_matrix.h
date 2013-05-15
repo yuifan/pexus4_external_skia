@@ -1,4 +1,14 @@
 
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+#include "SkMath.h"
+
+
 #define SCALE_NOFILTER_NAME     MAKENAME(_nofilter_scale)
 #define SCALE_FILTER_NAME       MAKENAME(_filter_scale)
 #define AFFINE_NOFILTER_NAME    MAKENAME(_nofilter_affine)

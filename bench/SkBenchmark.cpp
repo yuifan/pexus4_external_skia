@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkBenchmark.h"
 #include "SkPaint.h"
 #include "SkParse.h"
@@ -9,6 +16,7 @@ SkBenchmark::SkBenchmark(void* defineDict) {
     fForceAlpha = 0xFF;
     fForceAA = true;
     fDither = SkTriState::kDefault;
+    fHasStrokeWidth = false;
 }
 
 const char* SkBenchmark::getName() {

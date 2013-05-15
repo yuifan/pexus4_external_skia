@@ -1,19 +1,11 @@
-/* libs/graphics/images/SkImageDecoder_libpng.cpp
-**
-** Copyright 2006, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
-**
-**     http://www.apache.org/licenses/LICENSE-2.0 
-**
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
-** limitations under the License.
-*/
+
+/*
+ * Copyright 2006 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 
 #include "SkImageDecoder.h"
 #include "SkImageEncoder.h"
@@ -66,7 +58,7 @@ public:
 protected:
     virtual bool onBuildTileIndex(SkStream *stream,
              int *width, int *height);
-    virtual bool onDecodeRegion(SkBitmap* bitmap, SkIRect rect);
+    virtual bool onDecodeRegion(SkBitmap* bitmap, SkIRect region);
     virtual bool onDecode(SkStream* stream, SkBitmap* bm, Mode);
 
 private:
@@ -291,8 +283,20 @@ bool SkPNGImageDecoder::onDecode(SkStream* sk_stream, SkBitmap* decodedBitmap,
     const int sampleSize = this->getSampleSize();
     SkScaledBitmapSampler sampler(origWidth, origHeight, sampleSize);
 
-    decodedBitmap->setConfig(config, sampler.scaledWidth(),
-                             sampler.scaledHeight(), 0);
+    decodedBitmap->lockPixels();
+    void* rowptr = (void*) decodedBitmap->getPixels();
+    bool reuseBitmap = (rowptr != NULL);
+    decodedBitmap->unlockPixels();
+    if (reuseBitmap && (sampler.scaledWidth() != decodedBitmap->width() ||
+            sampler.scaledHeight() != decodedBitmap->height())) {
+        // Dimensions must match
+        return false;
+    }
+
+    if (!reuseBitmap) {
+        decodedBitmap->setConfig(config, sampler.scaledWidth(),
+                                 sampler.scaledHeight(), 0);
+    }
     if (SkImageDecoder::kDecodeBounds_Mode == mode) {
         return true;
     }
@@ -312,10 +316,12 @@ bool SkPNGImageDecoder::onDecode(SkStream* sk_stream, SkBitmap* decodedBitmap,
 
     SkAutoUnref aur(colorTable);
 
-    if (!this->allocPixelRef(decodedBitmap,
-                             SkBitmap::kIndex8_Config == config ?
-                                colorTable : NULL)) {
-        return false;
+    if (!reuseBitmap) {
+        if (!this->allocPixelRef(decodedBitmap,
+                                 SkBitmap::kIndex8_Config == config ?
+                                    colorTable : NULL)) {
+            return false;
+        }
     }
 
     SkAutoLockPixels alp(*decodedBitmap);
@@ -416,6 +422,9 @@ bool SkPNGImageDecoder::onDecode(SkStream* sk_stream, SkBitmap* decodedBitmap,
         reallyHasAlpha |= substituteTranspColor(decodedBitmap, theTranspColor);
     }
     decodedBitmap->setIsOpaque(!reallyHasAlpha);
+    if (reuseBitmap) {
+        decodedBitmap->notifyPixelsChanged();
+    }
     return true;
 }
 
@@ -607,7 +616,7 @@ bool SkPNGImageDecoder::decodePalette(png_structp png_ptr, png_infop info_ptr,
     return true;
 }
 
-bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
+bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect region) {
     int i;
     png_structp png_ptr = this->index->png_ptr;
     png_infop info_ptr = this->index->info_ptr;
@@ -615,13 +624,18 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
         return false;
     }
 
-    int requestedHeight = rect.fBottom - rect.fTop;
-    int requestedWidth = rect.fRight - rect.fLeft;
-
     png_uint_32 origWidth, origHeight;
     int bit_depth, color_type, interlace_type;
     png_get_IHDR(png_ptr, info_ptr, &origWidth, &origHeight, &bit_depth,
             &color_type, &interlace_type, int_p_NULL, int_p_NULL);
+
+    SkIRect rect = SkIRect::MakeWH(origWidth, origHeight);
+
+    if (!rect.intersect(region)) {
+        // If the requested region is entirely outsides the image, just
+        // returns false
+        return false;
+    }
 
     SkBitmap::Config    config;
     bool                hasAlpha = false;
@@ -634,7 +648,7 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
     }
 
     const int sampleSize = this->getSampleSize();
-    SkScaledBitmapSampler sampler(origWidth, requestedHeight, sampleSize);
+    SkScaledBitmapSampler sampler(origWidth, rect.height(), sampleSize);
 
     SkBitmap *decodedBitmap = new SkBitmap;
     SkAutoTDelete<SkBitmap> adb(decodedBitmap);
@@ -657,12 +671,25 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
 
     SkAutoUnref aur(colorTable);
 
-    if (!this->allocPixelRef(decodedBitmap,
-                             SkBitmap::kIndex8_Config == config ?
-                                colorTable : NULL)) {
-        return false;
+    // Check ahead of time if the swap(dest, src) is possible in crop or not.
+    // If yes, then we will stick to AllocPixelRef since it's cheaper with the swap happening.
+    // If no, then we will use alloc to allocate pixels to prevent garbage collection.
+    int w = rect.width() / sampleSize;
+    int h = rect.height() / sampleSize;
+    bool swapOnly = (rect == region) && (w == decodedBitmap->width()) &&
+                    (h == decodedBitmap->height()) &&
+                    ((0 - rect.x()) / sampleSize == 0) && bm->isNull();
+    if (swapOnly) {
+        if (!this->allocPixelRef(decodedBitmap,
+                SkBitmap::kIndex8_Config == config ? colorTable : NULL)) {
+            return false;
+        }
+    } else {
+        if (!decodedBitmap->allocPixels(
+            NULL, SkBitmap::kIndex8_Config == config ? colorTable : NULL)) {
+            return false;
+        }
     }
-
     SkAutoLockPixels alp(*decodedBitmap);
 
     /* Add filler (or alpha) byte (before/after each RGB triplet) */
@@ -683,8 +710,6 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
     */
     png_ptr->pass = 0;
     png_read_update_info(png_ptr, info_ptr);
-
-    SkDebugf("Request size %d %d\n", requestedWidth, requestedHeight);
 
     int actualTop = rect.fTop;
 
@@ -735,7 +760,7 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
                     png_read_rows(png_ptr, &bmRow, png_bytepp_NULL, 1);
                 }
                 uint8_t* row = base;
-                for (png_uint_32 y = 0; y < requestedHeight; y++) {
+                for (png_uint_32 y = 0; y < rect.height(); y++) {
                     uint8_t* bmRow = row;
                     png_read_rows(png_ptr, &bmRow, png_bytepp_NULL, 1);
                     row += rb;
@@ -768,8 +793,12 @@ bool SkPNGImageDecoder::onDecodeRegion(SkBitmap* bm, SkIRect rect) {
             }
         }
     }
-    cropBitmap(bm, decodedBitmap, sampleSize, rect.fLeft, rect.fTop,
-                requestedWidth, requestedHeight, 0, rect.fTop);
+    if (swapOnly) {
+        bm->swap(*decodedBitmap);
+    } else {
+        cropBitmap(bm, decodedBitmap, sampleSize, region.x(), region.y(),
+                   region.width(), region.height(), 0, rect.y());
+    }
 
     if (0 != theTranspColor) {
         reallyHasAlpha |= substituteTranspColor(decodedBitmap, theTranspColor);
@@ -989,6 +1018,11 @@ static inline int pack_palette(SkColorTable* ctable,
 class SkPNGImageEncoder : public SkImageEncoder {
 protected:
     virtual bool onEncode(SkWStream* stream, const SkBitmap& bm, int quality);
+private:
+    bool doEncode(SkWStream* stream, const SkBitmap& bm,
+                  const bool& hasAlpha, int colorType,
+                  int bitDepth, SkBitmap::Config config,
+                  png_color_8& sig_bit);
 };
 
 bool SkPNGImageEncoder::onEncode(SkWStream* stream, const SkBitmap& bitmap,
@@ -1050,6 +1084,15 @@ bool SkPNGImageEncoder::onEncode(SkWStream* stream, const SkBitmap& bitmap,
         // check if we can store in fewer than 8 bits
         bitDepth = computeBitDepth(ctable->count());
     }
+
+    return doEncode(stream, bitmap, hasAlpha, colorType,
+                    bitDepth, config, sig_bit);
+}
+
+bool SkPNGImageEncoder::doEncode(SkWStream* stream, const SkBitmap& bitmap,
+                  const bool& hasAlpha, int colorType,
+                  int bitDepth, SkBitmap::Config config,
+                  png_color_8& sig_bit) {
 
     png_structp png_ptr;
     png_infop info_ptr;
@@ -1128,7 +1171,12 @@ bool SkPNGImageEncoder::onEncode(SkWStream* stream, const SkBitmap& bitmap,
 
 #include "SkTRegistry.h"
 
-static SkImageDecoder* DFactory(SkStream* stream) {
+#ifdef SK_ENABLE_LIBPNG
+    SkImageDecoder* sk_libpng_dfactory(SkStream*);
+    SkImageEncoder* sk_libpng_efactory(SkImageEncoder::Type);
+#endif
+
+SkImageDecoder* sk_libpng_dfactory(SkStream* stream) {
     char buf[PNG_BYTES_TO_CHECK];
     if (stream->read(buf, PNG_BYTES_TO_CHECK) == PNG_BYTES_TO_CHECK &&
         !png_sig_cmp((png_bytep) buf, (png_size_t)0, PNG_BYTES_TO_CHECK)) {
@@ -1137,9 +1185,9 @@ static SkImageDecoder* DFactory(SkStream* stream) {
     return NULL;
 }
 
-static SkImageEncoder* EFactory(SkImageEncoder::Type t) {
+SkImageEncoder* sk_libpng_efactory(SkImageEncoder::Type t) {
     return (SkImageEncoder::kPNG_Type == t) ? SkNEW(SkPNGImageEncoder) : NULL;
 }
 
-static SkTRegistry<SkImageEncoder*, SkImageEncoder::Type> gEReg(EFactory);
-static SkTRegistry<SkImageDecoder*, SkStream*> gDReg(DFactory);
+static SkTRegistry<SkImageEncoder*, SkImageEncoder::Type> gEReg(sk_libpng_efactory);
+static SkTRegistry<SkImageDecoder*, SkStream*> gDReg(sk_libpng_dfactory);

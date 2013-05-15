@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkBorderView.h"
 #include "SkAnimator.h"
 #include "SkWidgetViews.h"
@@ -5,8 +12,10 @@
 #include "SkTime.h"
 #include "SkStackViewLayout.h"
 
-SkBorderView::SkBorderView() : fTop(SkIntToScalar(0)), fLeft(SkIntToScalar(0)),
-					fRight(SkIntToScalar(0)), fBottom(SkIntToScalar(0))
+SkBorderView::SkBorderView() : fLeft(SkIntToScalar(0)),
+                               fRight(SkIntToScalar(0)),
+                               fTop(SkIntToScalar(0)),
+                               fBottom(SkIntToScalar(0))
 {
 	fAnim.setHostEventSink(this);
 	init_skin_anim(kBorder_SkinEnum, &fAnim);

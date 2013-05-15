@@ -1,5 +1,12 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkDumpCanvas.h"
-#include "SkPicture.h"  
+#include "SkPicture.h"
 #include "SkPixelRef.h"
 #include "SkString.h"
 #include <stdarg.h>
@@ -42,7 +49,7 @@ static void dumpVerbs(const SkPath& path, SkString* str) {
                              pts[2].fX, pts[2].fY, pts[3].fX, pts[3].fY);
                 break;
             case SkPath::kClose_Verb:
-                str->appendf("X");
+                str->append("X");
                 break;
             case SkPath::kDone_Verb:
                 return;
@@ -105,7 +112,7 @@ static const char* toString(SkBitmap::Config config) {
 static void toString(const SkBitmap& bm, SkString* str) {
     str->printf("bitmap:[%d %d] %s", bm.width(), bm.height(),
                 toString(bm.config()));
-    
+
     SkPixelRef* pr = bm.pixelRef();
     if (NULL == pr) {
         // show null or the explicit pixel address (rare)
@@ -121,8 +128,7 @@ static void toString(const SkBitmap& bm, SkString* str) {
 }
 
 static void toString(const void* text, size_t len, SkPaint::TextEncoding enc,
-                     SkString* str, const SkPaint& paint,
-                     const SkScalar xpos[] = NULL) {
+                     SkString* str) {
     switch (enc) {
         case SkPaint::kUTF8_TextEncoding:
             str->printf("\"%.*s\"%s", SkMax32(len, 32), text,
@@ -132,28 +138,16 @@ static void toString(const void* text, size_t len, SkPaint::TextEncoding enc,
             str->printf("\"%.*S\"%s", SkMax32(len, 32), text,
                         len > 64 ? "..." : "");
             break;
-        case SkPaint::kGlyphID_TextEncoding: {
-            const uint16_t* glyphs = (const uint16_t*)text;
-            const int max = 32;
-            SkUnichar uni[max];
-            int count = SkMin32(len >> 1, max);
-            paint.glyphsToUnichars(glyphs, count, uni);
-            str->append("\"");
-            for (int i = 0; i < count; i++) {
-                str->appendUnichar(uni[i]);
-            }
-            if ((size_t)count < (len >> 1)) {
-                str->append("...");
-            }
-            str->append("\"");
-        } break;
+        case SkPaint::kGlyphID_TextEncoding:
+            str->set("<glyphs>");
+            break;
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 SkDumpCanvas::SkDumpCanvas(Dumper* dumper) : fNestLevel(0) {
-    dumper->safeRef();
+    SkSafeRef(dumper);
     fDumper = dumper;
 
     static const int WIDE_OPEN = 16384;
@@ -164,7 +158,7 @@ SkDumpCanvas::SkDumpCanvas(Dumper* dumper) : fNestLevel(0) {
 }
 
 SkDumpCanvas::~SkDumpCanvas() {
-    fDumper->safeUnref();
+    SkSafeUnref(fDumper);
 }
 
 void SkDumpCanvas::dump(Verb verb, const SkPaint* paint,
@@ -176,7 +170,7 @@ void SkDumpCanvas::dump(Verb verb, const SkPaint* paint,
     va_start(args, format);
     vsnprintf(buffer, BUFFER_SIZE, format, args);
     va_end(args);
-    
+
     if (fDumper) {
         fDumper->dump(this, verb, buffer, paint);
     }
@@ -239,18 +233,24 @@ void SkDumpCanvas::setMatrix(const SkMatrix& matrix) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool SkDumpCanvas::clipRect(const SkRect& rect, SkRegion::Op op) {
-    SkString str;
-    toString(rect, &str);
-    this->dump(kClip_Verb, NULL, "clipRect(%s %s)", str.c_str(), toString(op));
-    return this->INHERITED::clipRect(rect, op);
+static const char* bool_to_aastring(bool doAA) {
+    return doAA ? "AA" : "BW";
 }
 
-bool SkDumpCanvas::clipPath(const SkPath& path, SkRegion::Op op) {
+bool SkDumpCanvas::clipRect(const SkRect& rect, SkRegion::Op op, bool doAA) {
+    SkString str;
+    toString(rect, &str);
+    this->dump(kClip_Verb, NULL, "clipRect(%s %s %s)", str.c_str(), toString(op),
+               bool_to_aastring(doAA));
+    return this->INHERITED::clipRect(rect, op, doAA);
+}
+
+bool SkDumpCanvas::clipPath(const SkPath& path, SkRegion::Op op, bool doAA) {
     SkString str;
     toString(path, &str);
-    this->dump(kClip_Verb, NULL, "clipPath(%s %s)", str.c_str(), toString(op));
-    return this->INHERITED::clipPath(path, op);
+    this->dump(kClip_Verb, NULL, "clipPath(%s %s %s)", str.c_str(), toString(op),
+               bool_to_aastring(doAA));
+    return this->INHERITED::clipPath(path, op, doAA);
 }
 
 bool SkDumpCanvas::clipRegion(const SkRegion& deviceRgn, SkRegion::Op op) {
@@ -331,7 +331,7 @@ void SkDumpCanvas::drawSprite(const SkBitmap& bitmap, int x, int y,
 void SkDumpCanvas::drawText(const void* text, size_t byteLength, SkScalar x,
                              SkScalar y, const SkPaint& paint) {
     SkString str;
-    toString(text, byteLength, paint.getTextEncoding(), &str, paint);
+    toString(text, byteLength, paint.getTextEncoding(), &str);
     this->dump(kDrawText_Verb, &paint, "drawText(%s [%d] %g %g)", str.c_str(),
                byteLength, SkScalarToFloat(x), SkScalarToFloat(y));
 }
@@ -339,7 +339,7 @@ void SkDumpCanvas::drawText(const void* text, size_t byteLength, SkScalar x,
 void SkDumpCanvas::drawPosText(const void* text, size_t byteLength,
                                 const SkPoint pos[], const SkPaint& paint) {
     SkString str;
-    toString(text, byteLength, paint.getTextEncoding(), &str, paint);
+    toString(text, byteLength, paint.getTextEncoding(), &str);
     this->dump(kDrawText_Verb, &paint, "drawPosText(%s [%d] %g %g ...)",
                str.c_str(), byteLength, SkScalarToFloat(pos[0].fX),
                SkScalarToFloat(pos[0].fY));
@@ -349,7 +349,7 @@ void SkDumpCanvas::drawPosTextH(const void* text, size_t byteLength,
                                  const SkScalar xpos[], SkScalar constY,
                                  const SkPaint& paint) {
     SkString str;
-    toString(text, byteLength, paint.getTextEncoding(), &str, paint, xpos);
+    toString(text, byteLength, paint.getTextEncoding(), &str);
     this->dump(kDrawText_Verb, &paint, "drawPosTextH(%s [%d] %g %g ...)",
                str.c_str(), byteLength, SkScalarToFloat(xpos[0]),
                SkScalarToFloat(constY));
@@ -359,17 +359,9 @@ void SkDumpCanvas::drawTextOnPath(const void* text, size_t byteLength,
                                    const SkPath& path, const SkMatrix* matrix,
                                    const SkPaint& paint) {
     SkString str;
-    toString(text, byteLength, paint.getTextEncoding(), &str, paint);
+    toString(text, byteLength, paint.getTextEncoding(), &str);
     this->dump(kDrawText_Verb, &paint, "drawTextOnPath(%s [%d])",
                str.c_str(), byteLength);
-}
-
-void SkDumpCanvas::drawShape(SkShape* shape) {
-    this->dump(kDrawShape_Verb, NULL, "drawShape(%p)", shape);
-    fNestLevel += 1;
-    this->INHERITED::drawShape(shape);
-    fNestLevel -= 1;
-    this->dump(kDrawShape_Verb, NULL, "endShape(%p)", shape);
 }
 
 void SkDumpCanvas::drawPicture(SkPicture& picture) {
@@ -433,7 +425,7 @@ void SkFormatDumper::dump(SkDumpCanvas* canvas, SkDumpCanvas::Verb verb,
         tab.append("\t");
     }
     msg.printf("%s%s", tab.c_str(), str);
-    
+
     if (p) {
         msg.appendf(" color:0x%08X flags:%X", p->getColor(), p->getFlags());
         appendFlattenable(&msg, p->getShader(), "shader");
@@ -442,13 +434,13 @@ void SkFormatDumper::dump(SkDumpCanvas* canvas, SkDumpCanvas::Verb verb,
         appendFlattenable(&msg, p->getMaskFilter(), "maskFilter");
         appendFlattenable(&msg, p->getPathEffect(), "pathEffect");
         appendFlattenable(&msg, p->getColorFilter(), "filter");
-        
+
         if (SkDumpCanvas::kDrawText_Verb == verb) {
             msg.appendf(" textSize:%g", SkScalarToFloat(p->getTextSize()));
             appendPtr(&msg, p->getTypeface(), "typeface");
         }
     }
-    
+
     fProc(msg.c_str(), fRefcon);
 }
 

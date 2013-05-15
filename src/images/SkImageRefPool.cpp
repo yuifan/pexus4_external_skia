@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkImageRefPool.h"
 #include "SkImageRef.h"
 #include "SkThread.h"
@@ -52,7 +59,7 @@ void SkImageRefPool::setRAMUsed(size_t limit) {
     
     while (NULL != ref && fRAMUsed > limit) {
         // only purge it if its pixels are unlocked
-        if (0 == ref->getLockCount() && ref->fBitmap.getPixels()) {
+        if (!ref->isLocked() && ref->fBitmap.getPixels()) {
             size_t size = ref->ramUsed();
             SkASSERT(size <= fRAMUsed);
             fRAMUsed -= size;
@@ -174,10 +181,10 @@ void SkImageRefPool::dump() const {
     SkImageRef* ref = fHead;
     
     while (ref != NULL) {
-        SkDebugf("  [%3d %3d %d] ram=%d data=%d locks=%d %s\n", ref->fBitmap.width(),
+        SkDebugf("  [%3d %3d %d] ram=%d data=%d locked=%d %s\n", ref->fBitmap.width(),
                  ref->fBitmap.height(), ref->fBitmap.config(),
                  ref->ramUsed(), (int)ref->fStream->getLength(),
-                 ref->getLockCount(), ref->getURI());
+                 ref->isLocked(), ref->getURI());
         
         ref = ref->fNext;
     }

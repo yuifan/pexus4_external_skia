@@ -1,19 +1,11 @@
-/* libs/graphics/images/SkImageDecoder_libgif.cpp
-**
-** Copyright 2006, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
-**
-**     http://www.apache.org/licenses/LICENSE-2.0 
-**
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
-** limitations under the License.
-*/
+
+/*
+ * Copyright 2006 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 
 #include "SkImageDecoder.h"
 #include "SkColor.h"
@@ -199,10 +191,18 @@ bool SkGIFImageDecoder::onDecode(SkStream* sk_stream, SkBitmap* bm, Mode mode) {
                 return error_return(gif, *bm, "chooseFromOneChoice");
             }
             
-            bm->setConfig(SkBitmap::kIndex8_Config, width, height);
-            if (SkImageDecoder::kDecodeBounds_Mode == mode)
+            if (SkImageDecoder::kDecodeBounds_Mode == mode) {
+                bm->setConfig(SkBitmap::kIndex8_Config, width, height);
                 return true;
+            }
+#ifdef SK_BUILD_FOR_ANDROID
+            // No Bitmap reuse supported for this format
+            if (!bm->isNull()) {
+                return false;
+            }
+#endif
 
+            bm->setConfig(SkBitmap::kIndex8_Config, width, height);
             SavedImage* image = &gif->SavedImages[gif->ImageCount-1];
             const GifImageDesc& desc = image->ImageDesc;
             

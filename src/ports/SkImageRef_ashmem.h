@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef SkImageRef_ashmem_DEFINED
 #define SkImageRef_ashmem_DEFINED
 
@@ -15,6 +22,14 @@ public:
     SkImageRef_ashmem(SkStream*, SkBitmap::Config, int sampleSize = 1);
     virtual ~SkImageRef_ashmem();
     
+    // overrides
+    virtual void flatten(SkFlattenableWriteBuffer&) const;
+    virtual Factory getFactory() const {
+        return Create;
+    }
+    static SkPixelRef* Create(SkFlattenableReadBuffer&);
+
+    SK_DECLARE_PIXEL_REF_REGISTRAR()
 protected:
     virtual bool onDecode(SkImageDecoder* codec, SkStream* stream,
                           SkBitmap* bitmap, SkBitmap::Config config,
@@ -24,6 +39,7 @@ protected:
     virtual void onUnlockPixels();
     
 private:
+    SkImageRef_ashmem(SkFlattenableReadBuffer&);
     void closeFD();
 
     SkColorTable* fCT;

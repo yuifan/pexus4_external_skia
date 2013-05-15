@@ -1,3 +1,10 @@
+
+/*
+ * Copyright 2011 Google Inc.
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #include "SkChunkAlloc.h"
 #include "SkPackBits.h"
 #include "SkBitmap.h"
@@ -22,12 +29,12 @@ RLEPixelRef::RLEPixelRef(SkBitmap::RLEPixels* rlep, SkColorTable* ctable)
         : SkPixelRef(NULL) {
     fRLEPixels = rlep;  // we now own this ptr
     fCTable = ctable;
-    ctable->safeRef();
+    SkSafeRef(ctable);
 }
 
 RLEPixelRef::~RLEPixelRef() {
     SkDELETE(fRLEPixels);
-    fCTable->safeUnref();
+    SkSafeUnref(fCTable);
 }
 
 void* RLEPixelRef::onLockPixels(SkColorTable** ct) {
